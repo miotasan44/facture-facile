@@ -3,22 +3,26 @@ from fpdf import FPDF
 import datetime
 import streamlit.components.v1 as components
 
-# Injection du mode PWA
+# --- CONFIGURATION PWA & LOGO ---
+# Le ?v=3 force le téléphone à mettre à jour l'icône si tu la changes
 pwa_code = """
-<link rel="manifest" href="/manifest.json">
-<script>
-  if ('serviceWorker' in navigator) {
-    navigator.serviceWorker.register('/sw.js');
-  }
-</script>
+<link rel="manifest" href="./manifest.json?v=3">
+<link rel="apple-touch-icon" href="./logo.png?v=3">
+<link rel="icon" href="./logo.png?v=3" type="image/png">
+<meta name="theme-color" content="#28286e">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black">
 """
 components.html(pwa_code, height=0)
-# --- CONFIGURATION ---
+
+# --- CONFIGURATION DE LA PAGE ---
 st.set_page_config(page_title="Facturation Expert", page_icon="💼", layout="wide")
 
+# --- CLASSE PDF PERSONNALISÉE ---
 class PDF(FPDF):
     def header(self):
         try:
+            # Recherche du logo dans le dossier racine
             self.image('logo.png', 10, 8, 33)
         except:
             pass 
@@ -32,19 +36,20 @@ class PDF(FPDF):
         self.set_font("helvetica", "I", 8)
         self.cell(0, 5, "Indemnite forfaitaire pour frais de recouvrement de 40 euros due en cas de retard.", ln=True, align="C")
 
+# --- FONCTION DE GÉNÉRATION DU PDF ---
 def generate_pdf(client, liste_prods, invoice_no, tva_rate, my_info, iban_bic):
     pdf = PDF()
     pdf.add_page()
     euro = chr(128)
     
-    # --- ZONE ADRESSES (CORRIGÉE) ---
+    # --- ZONE ADRESSES (POSITIONNEMENT FIXE) ---
     pdf.set_font("helvetica", "B", 11)
     
     # Colonne GAUCHE (Ma Société)
     pdf.set_xy(10, 40)
     pdf.cell(90, 7, my_info['nom'].upper(), ln=0)
     
-    # Colonne DROITE (Destinaire)
+    # Colonne DROITE (Destinataire)
     pdf.set_xy(110, 40)
     pdf.cell(90, 7, "DESTINATAIRE :", ln=1)
     
@@ -54,20 +59,22 @@ def generate_pdf(client, liste_prods, invoice_no, tva_rate, my_info, iban_bic):
     pdf.set_xy(10, 47)
     pdf.multi_cell(90, 5, f"{my_info['adresse']}\nSIRET : {my_info['siret']}")
     
-    # Texte DROITE (On s'aligne sur la même hauteur que la gauche)
+    # Texte DROITE
     pdf.set_xy(110, 47)
     pdf.multi_cell(0, 5, f"{client['nom']}\n{client['adresse']}")
     
-    # On descend le curseur après les adresses pour la suite
-    pdf.set_y(80)
+    # Sécurité pour éviter que le tableau ne chevauche les adresses
+    pdf.set_y(85)
 
     # --- INFOS FACTURE ---
     pdf.set_fill_color(230, 230, 230)
     pdf.set_font("helvetica", "B", 10)
-    pdf.cell(0, 10, f"FACTURE N : {invoice_no}  |  Date : {datetime.date.today()}  |  Echeance : {datetime.date.today() + datetime.timedelta(days=30)}", fill=True, ln=True, align="C")
+    date_f = datetime.date.today()
+    echeance = date_f + datetime.timedelta(days=30)
+    pdf.cell(0, 10, f"FACTURE N : {invoice_no}  |  Date : {date_f}  |  Echeance : {echeance}", fill=True, ln=True, align="C")
     pdf.ln(5)
 
-    # --- TABLEAU ---
+    # --- TABLEAU DES ARTICLES ---
     pdf.set_fill_color(40, 40, 110)
     pdf.set_text_color(255)
     pdf.cell(90, 10, " Description", border=1, fill=True)
@@ -94,6 +101,7 @@ def generate_pdf(client, liste_prods, invoice_no, tva_rate, my_info, iban_bic):
     pdf.set_x(130)
     pdf.cell(35, 8, f"TVA ({tva_rate}%)", border=0)
     pdf.cell(35, 8, f"{tva_m:.2f} {euro}", border=1, ln=True, align="R")
+    
     pdf.set_font("helvetica", "B", 12)
     pdf.set_x(130)
     pdf.set_fill_color(40, 40, 110)
@@ -101,7 +109,7 @@ def generate_pdf(client, liste_prods, invoice_no, tva_rate, my_info, iban_bic):
     pdf.cell(35, 10, "TOTAL TTC", border=1, fill=True)
     pdf.cell(35, 10, f"{total_ht + tva_m:.2f} {euro}", border=1, fill=True, align="R", ln=True)
 
-    # --- BANQUE ---
+    # --- COORDONNÉES BANCAIRES ---
     pdf.ln(10)
     pdf.set_text_color(0)
     pdf.set_font("helvetica", "B", 10)
@@ -112,7 +120,7 @@ def generate_pdf(client, liste_prods, invoice_no, tva_rate, my_info, iban_bic):
 
     return pdf.output()
 
-# --- APP STREAMLIT ---
+# --- INTERFACE STREAMLIT ---
 if 'mes_produits' not in st.session_state:
     st.session_state.mes_produits = []
 
@@ -155,7 +163,19 @@ with c_prod:
 if st.session_state.mes_produits and n_cli:
     st.divider()
     try:
-        pdf_bytes = generate_pdf({"nom": n_cli, "adresse": a_cli}, st.session_state.mes_produits, num_f, tva_v, {"nom": ma_soc, "adresse": mon_adr, "siret": mon_sir}, {"iban": m_iban, "bic": m_bic})
-        st.download_button("📥 TELECHARGER LA FACTURE (PDF)", data=bytes(pdf_bytes), file_name=f"{num_f}.pdf", mime="application/pdf", use_container_width=True)
+        pdf_bytes = generate_pdf(
+            {"nom": n_cli, "adresse": a_cli}, 
+            st.session_state.mes_produits, 
+            num_f, tva_v, 
+            {"nom": ma_soc, "adresse": mon_adr, "siret": mon_sir}, 
+            {"iban": m_iban, "bic": m_bic}
+        )
+        st.download_button(
+            "📥 TÉLÉCHARGER LA FACTURE (PDF)", 
+            data=bytes(pdf_bytes), 
+            file_name=f"{num_f}.pdf", 
+            mime="application/pdf", 
+            use_container_width=True
+        )
     except Exception as e:
-        st.error(f"Erreur : {e}")
+        st.error(f"Erreur lors de la génération : {e}")
